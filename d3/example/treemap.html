@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+	<meta charset="utf-8">
+	<head>
+		<title>Zoomable Treemap</title>
+		<style>
+
+		#chart {
+			width: 800px;
+			height: 500px;
+			background: #bbb;
+		}
+
+		text {
+			pointer-events: none;
+		}
+
+		.grandparent text { /* header text */
+			font-weight: bold;
+			font-size: medium;
+			font-family: "Open Sans", Helvetica, Arial, sans-serif; 
+		}
+
+		rect {
+			fill: none;
+			stroke: #fff;
+		}
+
+		rect.parent, .grandparent rect {
+			stroke-width: 1px;
+		}
+
+		.grandparent rect {
+			fill: #fff;
+		}
+
+		.children rect.parent, .grandparent rect {
+			cursor: pointer;
+		}
+
+		rect.parent {
+			pointer-events: all; 
+		}
+
+		.children:hover rect.child,
+		.grandparent:hover rect {
+			fill: #aaa;
+		}
+
+		.textdiv { /* text in the boxes */
+			font-size: medium;
+			padding: 5px;
+			font-family: "Open Sans", Helvetica, Arial, sans-serif; 
+		}
+
+		</style>
+	</head>
+	<body>
+		<p id="chart">
+
+		<script src="http://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+		<script>
+			var margin = {top: 20, right: 0, bottom: 0, left: 0};
+			var width = 800;
+			var height = 500 - margin.top - margin.bottom;
+			var format_number = d3.format(",d");
+			var transitioning;
+			var colors;
+
+			/* create x and y scales */
+			var x = d3.scale.linear()
+				.domain([0, 1])
+				.range([0, width]);
+
+			var y = d3.scale.linear()
+				.domain([0, 1])
+				.range([0, height]);
+
+			var treemap = d3.layout.treemap()
+				.children(function(d) { return d.rows; })
+				.sort(function(a, b) { return a.values - b.values; })
+				.value(function(d) { return d.values; })
+				.round(false)
+				.mode("squarify")
+				.ratio(0.5);
+				/*
+				.ratio(height / width * 0.5 * (1 + Math.sqrt(5)));
+				*/
+
+			/* create svg */
+			var svg = d3.select("#chart").append("svg")
+				.attr("width", width + margin.left + margin.right)
+				.attr("height", height + margin.bottom + margin.top)
+				.style("margin-left", -margin.left + "px")
+				.style("margin.right", -margin.right + "px")
+				.append("g")
+				.attr("transform", "translate(" + margin.left + "," + margin.top + ")")
+				.style("shape-rendering", "crispEdges");
+
+			var grandparent = svg.append("g")
+				.attr("class", "grandparent");
+
+			grandparent.append("rect")
+				.attr("y", -margin.top)
+				.attr("width", width)
+				.attr("height", margin.top);
+
+			grandparent.append("text")
+				.attr("x", 6)
+				.attr("y", 6 - margin.top)
+				.attr("dy", ".75em");
+
+			/* load in data, display root */
+			var api_key = 'AIzaSyCnWo1USrkSKnN6oy02tNeWfg6aFSg0OI8';
+			var table_id = '1V2R7lsdg-GTbGOZ_h_DrGOa-Gfqk1PGA9h_n5zwU';
+			//var columns = ['Fund Description', 'Department', 'Division', 'Amount'];
+			var columns = ['Fund Description', 'Department', 'Division'];
+			columns = columns.map(function (x) { return "'" + x + "'"; });
+			var group_by = columns
+			var query = encodeURIComponent('SELECT ' + columns.join(',') + ',Sum(Amount) FROM ' + table_id + ' GROUP BY ' + columns);
+			var url = 'https://www.googleapis.com/fusiontables/v1/query?sql=' + query + '&key=' + api_key;
+			var min_area_for_text = 0.015;
+		
+
+			d3.json(url, function(data) {
+				function display(keys) {
+					/* accumulate and nest data to depth determined by keys*/
+					var nest = d3.nest();
+					d3.range(keys.length + 1)
+						.forEach(function(i) {
+							nest = nest.key(function(d) { return d[i]; });
+						});
+					nest = nest.rollup(function(d) { 
+							var sum = 0.0;
+							d.forEach(function(x) {
+								sum += parseFloat(x[3]);
+							});
+							return sum;})
+						.entries(data.rows);
+
+					/* get view data */
+					var view_data = nest;
+					keys.forEach(function(k) {
+						view_data = view_data.values.find(function(d) {
+							return d.key == k;
+						});
+					});
+
+					var root = {
+						name: 'budget',
+						rows: view_data
+					};
+
+					initialize(root);
+					layout(root);
+					display(root);
+
+					function initialize(root) {
+						root.children = root.rows;
+						root.x = root.y = 0;
+						root.dx = width;
+						root.dy = height;
+						root.depth = 0;
+						d3.selectAll(".depth").remove();
+						colors = d3.scale.category20().domain([0, root.children.length - 1]); 
+					}
+
+
+					// Compute the treemap layout recursively such that each group of siblings
+					// uses the same size (1×1) rather than the dimensions of the parent cell.
+					// This optimizes the layout for the current zoom state. Note that a wrapper
+					// object is created for the parent node for each group of siblings so that
+					// the parent’s dimensions are not discarded as we recurse. Since each group
+					// of sibling was laid out in 1×1, we must rescale to fit using absolute
+					// coordinates. This lets us use a viewport to zoom.
+					function layout(d) {
+						treemap.nodes(d);
+					}
+					/* display show the treemap and writes the embedded transition function */
+					function display(d) {
+						/* create grandparent bar at top */
+						grandparent.datum(d)
+							.on("click", function(d) {
+								transition(-1);
+							})
+							.select("text")
+							.text(function(d) { return d.key});
+
+						var g1 = svg.insert("g", ".grandparent")
+							.datum(d)
+							.attr("class", "depth");
+
+						/* add in data */
+						var g = g1.selectAll("g")
+							.data(d.children)
+							.enter().append("g")
+							.on("click", transition)
+							.attr("class", "groups");
+
+						/* transition on child click */
+						g.filter(function(d) { return d.children; })
+							.classed("children", true)
+							.on("click", transition);
+
+						/* write parent rectangle */
+						g.append("rect")
+							.attr("class", "parent")
+							.style("fill", function(d, i) { return colors(i);})
+							.call(rect)
+							.on("click", transition)
+							.on("mouseover", function() { 
+								d3.select(this).style("fill", "red");
+							})
+							.on("mouseout", function(d, i) {
+								d3.select(this).style("fill", colors(i));
+							})
+							.append("title")
+							.text(function(d) { format_number(d.value); });
+
+						/* Adding a foreign object instead of a text object, allows for text wrapping */
+						g.append("foreignObject")
+							.call(rect)
+							.attr("class","foreignobj")
+							.append("xhtml:div") 
+							.on("mouseover", function() { 
+								d3.select(this.parentNode.parentNode).select("rect").style("fill", "red");
+							})
+							.on("mouseout", function(d, i) { 
+								d3.select(this.parentNode.parentNode).select("rect").style("fill", colors(i));
+							})
+							.attr("dy", ".75em")
+							.html(function(d) { 
+								var area = d.dx * d.dy;
+								console.log(area);
+
+								if (area < min_area_for_text) {
+									return "";
+								}
+								return d.key; 
+							})
+							.attr("class","textdiv"); //textdiv class allows us to style the text easily with CSS
+						/* create transition function for transitions */
+						function transition(d) {
+							if (transitioning || !d) return;
+							transitioning = true;
+
+
+							/*
+							var g2 = display(d);
+							var t1 = g1.transition().duration(750)
+							var t2 = g2.transition().duration(750);
+
+							// Update the domain only after entering new elements.
+							x.domain([d.x, d.x + d.dx]);
+							y.domain([d.y, d.y + d.dy]);
+
+							// Enable anti-aliasing during the transition.
+							svg.style("shape-rendering", null);
+
+							// Draw child nodes on top of parent nodes.
+							svg.selectAll(".depth").sort(function(a, b) { return a.depth - b.depth; });
+
+							// Fade-in entering text.
+							g2.selectAll("text").style("fill-opacity", 0);
+							g2.selectAll("foreignObject div").style("display", "none"); 
+
+							// Transition to the new view.
+							t1.selectAll("text").call(text).style("fill-opacity", 0);
+							t2.selectAll("text").call(text).style("fill-opacity", 1);
+							t1.selectAll("rect").call(rect);
+							t2.selectAll("rect").call(rect);
+
+							t1.selectAll(".textdiv").style("display", "none"); 
+							t1.selectAll(".foreignobj").call(foreign); 
+							t2.selectAll(".textdiv").style("display", "block"); 
+							t2.selectAll(".foreignobj").call(foreign); 
+
+							// Remove the old node when the transition is finished.
+							t1.remove().each("end", function() {
+								svg.style("shape-rendering", "crispEdges");
+								transitioning = false;
+							});
+							*/
+							var new_level = d.key.length + 1;
+							//main(d.key, new_level);
+							transitioning = false;
+
+						}//endfunc transition
+
+						return g;
+					}//endfunc display
+					function text(text) {
+						text.attr("x", function(d) { return x(d.x) + 6; })
+							.attr("y", function(d) { return y(d.y) + 6; });
+					}
+
+					function rect(rect) {
+						rect.attr("x", function(d) { return x(d.x); })
+							.attr("y", function(d) { return y(d.y); })
+							.attr("width", function(d) { return x(d.x + d.dx) - x(d.x); })
+							.attr("height", function(d) { return y(d.y + d.dy) - y(d.y); });
+					}
+
+					function foreign(foreign){ /* added */
+						foreign.attr("x", function(d) { return x(d.x); })
+							.attr("y", function(d) { return y(d.y); })
+							.attr("width", function(d) { return x(d.x + d.dx) - x(d.x); })
+							.attr("height", function(d) { return y(d.y + d.dy) - y(d.y); });
+					}
+
+
+
+				}
+				display([]);
+			});
+
+			/*
+			var initial_keys = [];
+			var initial_group = 1;
+			if (window.location.hash.length > 0) {
+				var str = window.location.hash;
+				str = str.replace("#","");
+				initial_keys = str.split(".");
+				initial_group = initial_keys.length + 1;
+			}
+			*/
+
+			//main(initial_keys, initial_group);
+
+		</script>
+
+
+	</body>
+</html>

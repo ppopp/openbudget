@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+		<script src="http://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+		<style type="text/css">
+
+			.chart {
+				display: block;
+				margin: auto;
+				margin-top: 60px;
+				font-size: 11px;
+			}
+
+			rect {
+				stroke: #eee;
+				fill: #aaa;
+				fill-opacity: .8;
+			}
+
+			rect.parent {
+				cursor: pointer;
+				fill: steelblue;
+			}
+
+			text {
+				pointer-events: none;
+			}
+
+		</style>
+	</head>
+	<body>
+		<div id="body"></div>
+		<script type="text/javascript">
+
+			var hierarchy = ['Fund Description', 'Department', 'Division'].map(function(x) { return "'" + x + "'";});
+
+			/* create url to grab data from fusion tables */
+			function fusion_tables_url() {
+				var api_key = 'AIzaSyCnWo1USrkSKnN6oy02tNeWfg6aFSg0OI8';
+				var table_id = '1V2R7lsdg-GTbGOZ_h_DrGOa-Gfqk1PGA9h_n5zwU';
+
+				/* quote column names */
+				var columns = hierarchy.map(function(x) { return "'" + x + "'";});
+				/* generate SQL query for fusion tables */
+				var query = encodeURIComponent('SELECT ' + hierarchy.join(',') + ',Sum(Amount) FROM ' + table_id + ' GROUP BY ' + hierarchy.join(','));
+				/* create entire url for fusion tables */
+				var url = 'https://www.googleapis.com/fusiontables/v1/query?sql=' + query + '&key=' + api_key;
+				return url;
+			}
+
+
+
+			function build_data_recurse(parent_node, children) {
+				parent_node.children = [];
+				var value = 0.0;
+				children.forEach(function(child) {
+					var data_child = {
+						name: child.key
+					};
+					if (child.hasOwnProperty('values')) {
+						if (isNaN(child.values)) {
+							if (child.values instanceof Array) {
+								value += build_data_recurse(data_child, child.values);
+							}
+						}
+						else {
+							var child_size = parseFloat(child.values);
+							data_child.size = child_size;
+							value += child_size;
+						}
+					}
+					parent_node.children.push(data_child);
+				});
+				if (parent_node.children.length < 2) {
+					delete parent_node.children;
+				}
+				else {
+					parent_node.children.sort(function(a, b) {
+						return b.size - a.size;
+					});
+				}
+				parent_node.size = value;
+
+				return value;
+			}
+
+
+
+			function build_data(data) {
+				var root = {
+					name: 'budget'
+				};
+				build_data_recurse(root, data);
+				return root;
+			}
+
+			/* visualization parameters */
+			var max_funds = 20;
+			var w = 1120,
+				h = 600,
+				x = d3.scale.linear().range([0, w]),
+				y = d3.scale.linear().range([0, h]);
+
+			/* create main svg */
+			var vis = d3.select("#body").append("div")
+				.attr("class", "chart")
+				.style("width", w + "px")
+				.style("height", h + "px")
+				.append("svg:svg")
+				.attr("width", w)
+				.attr("height", h);
+
+			var partition = d3.layout.partition()
+				.value(function(d) { return d.size; });
+
+
+
+
+			d3.json(fusion_tables_url(), function(budget_data) {
+
+				/* accumulate and nest data to depth determined by keys*/
+				var nest = d3.nest();
+				var keys = []
+				d3.range(hierarchy.length)
+					.forEach(function(i) {
+						nest = nest.key(function(d) { return d[i]; });
+					});
+				nest = nest.rollup(function(d) { 
+					var sum = 0.0;
+					d.forEach(function(x) {
+						sum += parseFloat(x[3]);
+					});
+					return sum;
+				}).entries(budget_data.rows);
+
+
+				var root = build_data(nest);
+				root.children = root.children.slice(0, max_funds);
+
+				var nodes = partition.nodes(root);
+
+				var g = vis.selectAll("g")
+					.data(partition.nodes(root))
+					.enter().append("svg:g")
+					.attr("transform", function(d) { return "translate(" + x(d.y) + "," + y(d.x) + ")"; })
+					.on("click", click);
+
+				var kx = w / root.dx,
+					ky = h / 1;
+
+				g.append("svg:rect")
+					.attr("width", root.dy * kx)
+					.attr("height", function(d) { return d.dx * ky; })
+					.attr("class", function(d) { return d.children ? "parent" : "child"; });
+
+				g.append("svg:text")
+					.attr("transform", transform)
+					.attr("dy", ".35em")
+					.style("color", "red")
+					.style("opacity", function(d) { return d.dx * ky > 12 ? 1 : 0; })
+					.text(function(d) { return d.name; })
+
+				d3.select(window).on("click", function() { click(root); })
+
+				function click(d) {
+					if (!d.children) return;
+
+					kx = (d.y ? w - 40 : w) / (1 - d.y);
+					ky = h / d.dx;
+					x.domain([d.y, 1]).range([d.y ? 40 : 0, w]);
+					y.domain([d.x, d.x + d.dx]);
+
+					var t = g.transition()
+						.duration(d3.event.altKey ? 7500 : 750)
+						.attr("transform", function(d) { return "translate(" + x(d.y) + "," + y(d.x) + ")"; });
+
+					t.select("rect")
+						.attr("width", d.dy * kx)
+						.attr("height", function(d) { return d.dx * ky; });
+
+					t.select("text")
+						.attr("transform", transform)
+						.style("opacity", function(d) { return d.dx * ky > 12 ? 1 : 0; });
+
+					d3.event.stopPropagation();
+				}
+
+				function transform(d) {
+					return "translate(8," + d.dx * ky / 2 + ")";
+				}
+			});
+		</script>
+	</body>
+</html>
