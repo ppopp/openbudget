@@ -51,47 +51,66 @@
 
 
 
-			function build_data_recurse(parent_node, children) {
-				parent_node.children = [];
+			/* helper function for preparing data for visualization */
+			function prepare_recurse(node) {
+				/* nodes need to have 'children' in order to work with calls to 
+				   d3.layout.partition
+				 */
+
+				/* hold sum of child values */
 				var value = 0.0;
-				children.forEach(function(child) {
-					var data_child = {
-						name: child.key
-					};
+
+				/* recurse through children of node */
+				node.children.forEach(function(child) {
+					/* 'values' either contains the budget amount for a node, 
+					   or it contains a list of sub nodes.  This code checks
+					   whether 'values' is an array or a number.  If it is a 
+					   number it accumulates it, otherwise it continues to 
+					   process the children
+					 */
 					if (child.hasOwnProperty('values')) {
 						if (isNaN(child.values)) {
 							if (child.values instanceof Array) {
-								value += build_data_recurse(data_child, child.values);
+								/* for visualization code, need to set children variable */
+								child.children = child.values;
+								value += prepare_recurse(child);
 							}
 						}
 						else {
-							var child_size = parseFloat(child.values);
-							data_child.size = child_size;
-							value += child_size;
+							/* parse integer of child values */
+							child.value = parseFloat(child.values);
+							value += child.value;
 						}
 					}
-					parent_node.children.push(data_child);
 				});
-				if (parent_node.children.length < 2) {
-					delete parent_node.children;
+
+				/* assign the value for this node as the sum of the child values */
+				node.value = value;
+
+				/* if only one child, delete children */
+				if (node.children.length < 2) {
+					delete node.children;
 				}
 				else {
-					parent_node.children.sort(function(a, b) {
-						return b.size - a.size;
+					/* sort child values */
+					node.children.sort(function(a, b) {
+						return b.value - a.value;
 					});
 				}
-				parent_node.size = value;
 
+				/* return this nodes value */
 				return value;
 			}
 
 
 
-			function build_data(data) {
+			/* process the return to d3.nest so that it can be displayed */
+			function prepare(data) {
 				var root = {
-					name: 'budget'
+					key: 'Budget',
+					children: data
 				};
-				build_data_recurse(root, data);
+				prepare_recurse(root);
 				return root;
 			}
 
@@ -111,21 +130,23 @@
 				.attr("width", w)
 				.attr("height", h);
 
-			var partition = d3.layout.partition()
-				.value(function(d) { return d.size; });
 
-
+				/* todo: can we add in information that says "this is 10% of total budget, 30% of general fund, 80% of division */
 
 
 			d3.json(fusion_tables_url(), function(budget_data) {
-
-				/* accumulate and nest data to depth determined by keys*/
+				/* d3.nest takes the row data given by fusion tables and converts it into 
+				   hierarchical data needed for our visualization.  Accumulate 
+				   and nest data to depth determined by 'heirarchy' 
+				 */
 				var nest = d3.nest();
-				var keys = []
 				d3.range(hierarchy.length)
 					.forEach(function(i) {
+						/* recursively apply hierarchy keys */
 						nest = nest.key(function(d) { return d[i]; });
 					});
+
+				/* when rolling up child data into group, sum their values */
 				nest = nest.rollup(function(d) { 
 					var sum = 0.0;
 					d.forEach(function(x) {
@@ -135,13 +156,15 @@
 				}).entries(budget_data.rows);
 
 
-				var root = build_data(nest);
+				/* prepare data for visualization */
+				var root = prepare(nest);
+				/* remove lowest funds */
 				root.children = root.children.slice(0, max_funds);
 
-				var nodes = partition.nodes(root);
 
+				/* create visualizations */
 				var g = vis.selectAll("g")
-					.data(partition.nodes(root))
+					.data(d3.layout.partition().nodes(root))
 					.enter().append("svg:g")
 					.attr("transform", function(d) { return "translate(" + x(d.y) + "," + y(d.x) + ")"; })
 					.on("click", click);
@@ -159,18 +182,18 @@
 					.attr("dy", ".35em")
 					.style("color", "red")
 					.style("opacity", function(d) { return d.dx * ky > 12 ? 1 : 0; })
-					.text(function(d) { return d.name; })
+					.text(function(d) { return d.key; });
 
 				d3.select(window).on("click", function() { click(root); })
 
+				/* callback when a box gets clicked */
 				function click(d) {
-					if (!d.children) return;
-
 					kx = (d.y ? w - 40 : w) / (1 - d.y);
 					ky = h / d.dx;
 					x.domain([d.y, 1]).range([d.y ? 40 : 0, w]);
 					y.domain([d.x, d.x + d.dx]);
 
+					/* create transition */
 					var t = g.transition()
 						.duration(d3.event.altKey ? 7500 : 750)
 						.attr("transform", function(d) { return "translate(" + x(d.y) + "," + y(d.x) + ")"; });
