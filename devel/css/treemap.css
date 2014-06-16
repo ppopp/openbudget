@@ -1,0 +1,62 @@
+.treemap .grandparent {
+}
+
+.treemap .depth {
+}
+
+.treemap .groups {
+}
+
+.treemap .children {
+}
+
+.treemap .parent {
+}
+
+.treemap .text {
+}
+
+.treemap .textdiv {
+}
+
+.treemap .amount {
+}
+
+.treemap .name {
+}
+
+.treemap .grandparent text { /* header text */
+	font-weight: bold;
+	font-size: medium;
+	font-family: "Open Sans", Helvetica, Arial, sans-serif; 
+}
+.treemap rect {
+	fill: none;
+	stroke: #fff;
+}
+
+.treemap rect.parent, .grandparent rect {
+	stroke-width: 1px;
+}
+
+.treemap .grandparent rect {
+	fill: #fff;
+}
+
+.treemap .children rect.parent, .grandparent rect {
+	cursor: pointer;
+}
+
+.treemap rect.parent {
+	pointer-events: all; 
+}
+.treemap .textdiv { /* text in the boxes */
+	font-size: small;
+	padding: 5px;
+	color: white;
+	pointer-events: none;
+}
+
+.treemap text {
+	pointer-events: none;
+}

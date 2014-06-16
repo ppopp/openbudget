@@ -1,0 +1,26 @@
+.spreadsheet table {
+	display: block;
+	margin: auto;
+}
+
+.spreadsheet table,tbody {
+	border-collapse:collapse;
+	border: 0px;
+}
+.spreadsheet th {
+	text-align: left;
+}
+
+.spreadsheet th,td
+{
+	border-top: 1px solid black;
+	border-left: 0px;
+	border-right: 0px;
+	border-collapse:collapse;
+	padding: 5px;
+}
+
+.square {
+	width: 10px;
+	height: 10px;
+}
